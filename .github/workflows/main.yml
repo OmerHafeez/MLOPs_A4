@@ -1,64 +1,56 @@
-name: MLOps CI/CD Pipeline
+name: Fraud_Detection_CICD
 
-on: [push]
+# 1. Triggers (Kab chalna chahiye?)
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  #  JOB 1: BUILD & TEST
-  build-and-test:
+  # STAGE 1: Continuous Integration (Checking the code)
+  CI_Stage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v2
         with:
-          python-version: '3.12'
+          python-version: '3.9'
 
       - name: Install Dependencies
         run: |
-          pip install fastapi uvicorn prometheus-client pydantic pytest httpx
+          pip install pandas pytest scikit-learn xgboost lightgbm
 
-      - name: Run Unit Tests
+      - name: Run Unit Tests & Linting
         run: |
-          # temp test file to check API endpoints
-          cat <<EOF > test_main.py
-          from fastapi.testclient import TestClient
-          from app import app
+          # Yahan tum apne tests chalaoge (e.g., check if data exists)
+          pytest tests/
 
-          client = TestClient(app)
-
-          def test_read_main():
-              response = client.get("/")
-              assert response.status_code == 200
-              assert response.json()["status"] == "success"
-
-          def test_predict_endpoint():
-              payload = {
-                  "Air_Temperature": 300.0,
-                  "Process_Temperature": 310.0,
-                  "Rotational_Speed": 1500.0,
-                  "Torque": 40.0,
-                  "Tool_Wear": 50.0
-              }
-              response = client.post("/predict", json=payload)
-              assert response.status_code == 200
-              assert "Machine_Failure" in response.json()
-          EOF
-          pytest test_main.py
-
-  #  JOB 2: DEPLOY 
-  deploy:
-    needs: build-and-test  
+  # STAGE 2: Build & Package (Dockerizing)
+  Build_Stage:
+    needs: CI_Stage
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Deployment Simulation
+      - name: Build and Push Docker Image
         run: |
-          echo "Deploying to Production Server..."
-          echo "Building Docker Images..."
-         
-          echo "MLOps Pipeline Deployed Successfully! "
+          docker build -t your-docker-id/fraud-detection-component:latest .
+          docker push your-docker-id/fraud-detection-component:latest
+
+  # STAGE 3: Continuous Deployment (Triggering Kubeflow)
+  CD_Stage:
+    needs: Build_Stage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Kubeflow Pipeline
+        run: |
+          # Yeh script tumhare pipeline.yaml ko Kubeflow engine pe submit karegi
+          python run_pipeline_remote.py
