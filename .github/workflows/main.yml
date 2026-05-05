@@ -1,0 +1,64 @@
+name: MLOps CI/CD Pipeline
+
+on: [push]
+
+jobs:
+  #  JOB 1: BUILD & TEST
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          pip install fastapi uvicorn prometheus-client pydantic pytest httpx
+
+      - name: Run Unit Tests
+        run: |
+          # temp test file to check API endpoints
+          cat <<EOF > test_main.py
+          from fastapi.testclient import TestClient
+          from app import app
+
+          client = TestClient(app)
+
+          def test_read_main():
+              response = client.get("/")
+              assert response.status_code == 200
+              assert response.json()["status"] == "success"
+
+          def test_predict_endpoint():
+              payload = {
+                  "Air_Temperature": 300.0,
+                  "Process_Temperature": 310.0,
+                  "Rotational_Speed": 1500.0,
+                  "Torque": 40.0,
+                  "Tool_Wear": 50.0
+              }
+              response = client.post("/predict", json=payload)
+              assert response.status_code == 200
+              assert "Machine_Failure" in response.json()
+          EOF
+          pytest test_main.py
+
+  #  JOB 2: DEPLOY 
+  deploy:
+    needs: build-and-test  
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Deployment Simulation
+        run: |
+          echo "Deploying to Production Server..."
+          echo "Building Docker Images..."
+         
+          echo "MLOps Pipeline Deployed Successfully! "
