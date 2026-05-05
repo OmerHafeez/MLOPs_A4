@@ -1,0 +1,234 @@
+# PIPELINE DEFINITION
+# Name: fraud-detection-pipeline
+# Description: IEEE Fraud Detection Pipeline
+components:
+  comp-ingest-data:
+    executorLabel: exec-ingest-data
+    outputDefinitions:
+      artifacts:
+        output_csv:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-preprocess-data:
+    executorLabel: exec-preprocess-data
+    inputDefinitions:
+      artifacts:
+        input_csv:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        X_test_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        X_train_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        y_test_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        y_train_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        X_train_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        y_train_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        model_output:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-ingest-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - ingest_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'requests'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef ingest_data(output_csv: dsl.OutputPath('CSV')):\n    import pandas\
+          \ as pd\n\n    print(\"Downloading dataset from local host...\")\n    #\
+          \ host.minikube.internal is how Minikube talks to your Windows machine\n\
+          \    url = \"http://host.minikube.internal:8000/train_transaction.csv\"\n\
+          \n    # We use nrows=30000 to prevent your 7GB cluster from crashing with\
+          \ Out-Of-Memory errors\n    df = pd.read_csv(url, nrows=30000)\n\n    #\
+          \ Save to Kubeflow artifact storage\n    df.to_csv(output_csv, index=False)\n\
+          \    print(f\"Data Ingestion Complete. Loaded {df.shape[0]} rows and {df.shape[1]}\
+          \ columns.\")\n\n"
+        image: python:3.11
+    exec-preprocess-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'imbalanced-learn'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_data(input_csv: dsl.InputPath('CSV'), \n         \
+          \           X_train_path: dsl.OutputPath('CSV'), \n                    X_test_path:\
+          \ dsl.OutputPath('CSV'), \n                    y_train_path: dsl.OutputPath('CSV'),\
+          \ \n                    y_test_path: dsl.OutputPath('CSV')):\n\n    import\
+          \ pandas as pd\n    from sklearn.model_selection import train_test_split\n\
+          \    from sklearn.preprocessing import LabelEncoder\n    from imblearn.over_sampling\
+          \ import SMOTE\n\n    df = pd.read_csv(input_csv)\n\n    # Task 2: Handle\
+          \ Missing Values (Advanced Strategy - Median for numerical, Mode for categorical)\n\
+          \    for col in df.columns:\n        if df[col].dtype == 'object':\n   \
+          \         df[col].fillna(df[col].mode()[0], inplace=True)\n        else:\n\
+          \            df[col].fillna(df[col].median(), inplace=True)\n\n    # Task\
+          \ 2: High-Cardinality Categorical Features (Label Encoding)\n    cat_cols\
+          \ = df.select_dtypes(include=['object']).columns\n    le = LabelEncoder()\n\
+          \    for col in cat_cols:\n        df[col] = le.fit_transform(df[col].astype(str))\n\
+          \n    X = df.drop(['isFraud', 'TransactionID'], axis=1) # isFraud is the\
+          \ target\n    y = df['isFraud']\n\n    X_train, X_test, y_train, y_test\
+          \ = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)\n\
+          \n    # Task 2: Class Imbalance Strategy - SMOTE\n    print(\"Applying SMOTE\
+          \ to handle class imbalance...\")\n    smote = SMOTE(random_state=42)\n\
+          \    X_train_resampled, y_train_resampled = smote.fit_resample(X_train,\
+          \ y_train)\n\n    X_train_resampled.to_csv(X_train_path, index=False)\n\
+          \    X_test.to_csv(X_test_path, index=False)\n    y_train_resampled.to_csv(y_train_path,\
+          \ index=False)\n    y_test.to_csv(y_test_path, index=False)\n    print(\"\
+          Preprocessing and SMOTE complete.\")\n\n"
+        image: python:3.11
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'xgboost'\
+          \ 'scikit-learn'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(X_train_path: dsl.InputPath('CSV'), \n          \
+          \      y_train_path: dsl.InputPath('CSV'),\n                model_output:\
+          \ dsl.OutputPath('Model')):\n    import pandas as pd\n    from xgboost import\
+          \ XGBClassifier\n    import pickle\n\n    X_train = pd.read_csv(X_train_path)\n\
+          \    y_train = pd.read_csv(y_train_path).squeeze()\n\n    # Task 4: Cost-Sensitive\
+          \ Learning (Higher penalty for false negatives)\n    scale_weight = len(y_train[y_train\
+          \ == 0]) / (len(y_train[y_train == 1]) + 1)\n\n    model = XGBClassifier(use_label_encoder=False,\
+          \ eval_metric='logloss', scale_pos_weight=scale_weight)\n    model.fit(X_train,\
+          \ y_train)\n\n    with open(model_output, 'wb') as f:\n        pickle.dump(model,\
+          \ f)\n    print(\"XGBoost Model Trained successfully.\")\n\n"
+        image: python:3.11
+pipelineInfo:
+  description: IEEE Fraud Detection Pipeline
+  name: fraud-detection-pipeline
+root:
+  dag:
+    tasks:
+      ingest-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-ingest-data
+        taskInfo:
+          name: ingest-data
+      preprocess-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-data
+        dependentTasks:
+        - ingest-data
+        inputs:
+          artifacts:
+            input_csv:
+              taskOutputArtifact:
+                outputArtifactKey: output_csv
+                producerTask: ingest-data
+        taskInfo:
+          name: preprocess-data
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - preprocess-data
+        inputs:
+          artifacts:
+            X_train_path:
+              taskOutputArtifact:
+                outputArtifactKey: X_train_path
+                producerTask: preprocess-data
+            y_train_path:
+              taskOutputArtifact:
+                outputArtifactKey: y_train_path
+                producerTask: preprocess-data
+        taskInfo:
+          name: train-model
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.0
